@@ -106,6 +106,118 @@ end
 function KeySystem.isInvalidKey(code)
     return code == "KEY_INVALID" or code == "KEY_EXPIRED" or code == "KEY_INVALIDATED" or code == "ALREADY_USED"
 end
+function KeySystem.chooseGame()
+    local previous=environment.AnerialGamePicker
+    if previous and previous.close then previous.close() end
+    local state={done=false,selected=nil,connections={}}
+    environment.AnerialGamePicker=state
+    local Players=game:GetService("Players")
+    local UIS=game:GetService("UserInputService")
+    local TweenService=game:GetService("TweenService")
+    local gui=Instance.new("ScreenGui")
+    gui.Name="AnerialGamePicker";gui.ResetOnSpawn=false;gui.IgnoreGuiInset=true;gui.DisplayOrder=1001
+    local completed=Instance.new("BindableEvent")
+    local function connect(signal,callback)
+        local c=signal:Connect(callback);table.insert(state.connections,c);return c
+    end
+    local function round(node,radius)
+        local c=Instance.new("UICorner");c.CornerRadius=UDim.new(0,radius);c.Parent=node
+    end
+    local card=Instance.new("Frame")
+    card.Name="Card";card.AnchorPoint=Vector2.new(0.5,0.5);card.Position=UDim2.fromScale(0.5,0.5)
+    card.Size=UDim2.fromOffset(350,198);card.BackgroundColor3=Color3.fromRGB(14,14,14);card.BorderSizePixel=0
+    card.Parent=gui;round(card,14)
+    local border=Instance.new("UIStroke");border.Color=Color3.fromRGB(72,72,72);border.Transparency=0.35;border.Parent=card
+    local scale=Instance.new("UIScale");scale.Parent=card
+    local function resize()
+        local camera=workspace.CurrentCamera
+        if camera then scale.Scale=math.clamp(math.min((camera.ViewportSize.X-24)/350,(camera.ViewportSize.Y-24)/198),0.4,1) end
+    end
+    local function label(text,y,size)
+        local node=Instance.new("TextLabel");node.BackgroundTransparency=1;node.Position=UDim2.fromOffset(20,y)
+        node.Size=UDim2.fromOffset(310,24);node.Text=text;node.Font=Enum.Font.Gotham;node.TextSize=size
+        node.TextColor3=Color3.fromRGB(235,235,235);node.TextXAlignment=Enum.TextXAlignment.Left;node.Parent=card;return node
+    end
+    local title=label("Anerial",14,19);title.Font=Enum.Font.GothamBold;title.Active=true
+    local subtitle=label("What game do you want to play?",43,11);subtitle.TextColor3=Color3.fromRGB(158,158,158)
+    local function finish(gameName)
+        if state.done then return end
+        state.done=true;state.selected=gameName
+        if state.dragTween then state.dragTween:Cancel() end
+        for _,c in ipairs(state.connections) do c:Disconnect() end
+        gui:Destroy();completed:Fire()
+    end
+    state.close=function() finish(nil) end
+    connect(gui.Destroying,function() if not state.done then finish(nil) end end)
+    local function button(text,id,y)
+        local node=Instance.new("TextButton");node.Name=id;node.Text=text;node.Font=Enum.Font.GothamMedium
+        node.TextSize=13;node.TextColor3=Color3.fromRGB(235,235,235);node.BackgroundColor3=Color3.fromRGB(23,23,23)
+        node.Position=UDim2.fromOffset(20,y);node.Size=UDim2.fromOffset(310,38);node.BorderSizePixel=0
+        node.AutoButtonColor=false;node.Parent=card;round(node,8)
+        connect(node.MouseEnter,function() TweenService:Create(node,TweenInfo.new(0.15),{BackgroundColor3=Color3.fromRGB(36,36,36)}):Play() end)
+        connect(node.MouseLeave,function() TweenService:Create(node,TweenInfo.new(0.15),{BackgroundColor3=Color3.fromRGB(23,23,23)}):Play() end)
+        connect(node.Activated,function() finish(id) end)
+    end
+    button("Blade Ball","BladeBall",82)
+    button("Sniper Arena","SniperArena",132)
+    local drag
+    connect(title.InputBegan,function(input)
+        if input.UserInputType==Enum.UserInputType.MouseButton1 or input.UserInputType==Enum.UserInputType.Touch then
+            drag={input=input,start=input.Position,position=card.Position}
+        end
+    end)
+    connect(UIS.InputChanged,function(input)
+        if not drag then return end
+        if input.UserInputType~=Enum.UserInputType.MouseMovement and input~=drag.input then return end
+        local delta=input.Position-drag.start
+        if state.dragTween then state.dragTween:Cancel() end
+        state.dragTween=TweenService:Create(card,TweenInfo.new(0.2,Enum.EasingStyle.Quint,Enum.EasingDirection.Out),{
+            Position=UDim2.new(drag.position.X.Scale,drag.position.X.Offset+delta.X,drag.position.Y.Scale,drag.position.Y.Offset+delta.Y)})
+        state.dragTween:Play()
+    end)
+    connect(UIS.InputEnded,function(input)
+        if drag and (input==drag.input or input.UserInputType==Enum.UserInputType.MouseButton1) then drag=nil end
+    end)
+    connect(UIS.WindowFocusReleased,function() drag=nil end)
+    if workspace.CurrentCamera then connect(workspace.CurrentCamera:GetPropertyChangedSignal("ViewportSize"),resize) end
+    gui.Parent=Players.LocalPlayer:WaitForChild("PlayerGui");resize()
+    while not state.done do completed.Event:Wait() end
+    completed:Destroy()
+    if environment.AnerialGamePicker==state then environment.AnerialGamePicker=nil end
+    return state.selected
+end
+function KeySystem.launchSelectedGame(key)
+    local owner=environment.AnerialKeySystem
+    local selected=KeySystem.chooseGame()
+    if environment.AnerialKeySystem~=owner then return false end
+    if not selected then environment.UI_CLOSED=true;return false end
+    environment.SCRIPT_KEY=key
+    environment.UI_CLOSED=false
+    if selected=="BladeBall" then
+        if Config.Mode=="External" then
+            local ok,err=pcall(function() KeySystem.getSdk().load_script() end)
+            if not ok then warn("[Anerial] Blade Ball could not be loaded: "..tostring(err)) end
+            return ok
+        end
+        return true
+    end
+    if selected=="SniperArena" then
+        local ok,err=pcall(function()
+            local source=game:HttpGet("https://api.jnkie.com/api/v1/luascripts/public/79f11e3b05e34df5cbe877cfb27dab4743dda03c8eb512210b78f60af2f21fc1/download")
+            local chunk,compileError=loadstring(source,"=AnerialSniperArena")
+            assert(chunk,compileError)
+            chunk()
+        end)
+        if Config.Mode=="Inline" then environment.UI_CLOSED=true end
+        if not ok then warn("[Anerial] Sniper Arena could not be loaded: "..tostring(err)) end
+        return ok
+    end
+    environment.UI_CLOSED=true
+    return false
+end
+
+local previousPicker=environment.AnerialGamePicker
+if previousPicker and previousPicker.close then previousPicker.close() end
 local previous = environment.AnerialKeySystem
 if previous and type(previous.close) == "function" then previous.close() end
 local startup = {done = false, checking = true, cancelled = false}
@@ -122,11 +234,8 @@ if savedKey then
         startup.done, startup.checking = true, false
         startup.cached = true
         environment.SCRIPT_KEY = savedKey
-        if Config.Mode == "External" then
-            local ok = pcall(function() KeySystem.getSdk().load_script() end)
-            if not ok then warn("[Anerial] The protected script could not be loaded. Check your key and connection.") end
-            return
-        end
+        local launched=KeySystem.launchSelectedGame(savedKey)
+        if Config.Mode=="External" or not launched or environment.UI_CLOSED then return end
     elseif KeySystem.isInvalidKey(code) then
         KeySystem.forgetSavedKey()
         initialMessage = "Key expired or invalid. Try again."
@@ -475,9 +584,6 @@ if not state.selectedKey then
     return
 end
 environment.SCRIPT_KEY = state.selectedKey
-if Config.Mode == "External" then
-    local ok = pcall(function() KeySystem.getSdk().load_script() end)
-    if not ok then warn("[Anerial] The protected script could not be loaded. Check your key and connection.") end
-end
+KeySystem.launchSelectedGame(state.selectedKey)
 
 end
